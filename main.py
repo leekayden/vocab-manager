@@ -3,6 +3,9 @@ from tkinter import messagebox, ttk
 import mysql.connector
 import requests
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 DB_CONFIG = {
     "user": os.environ["DB_USER"],
@@ -206,7 +209,6 @@ init_db()
 root = tk.Tk()
 root.title("Vocabulary Manager")
 root.state("zoomed")
-root.iconbitmap("icon.ico")
 
 main_frame = ttk.Frame(root)
 main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
