@@ -2,12 +2,13 @@ import tkinter as tk
 from tkinter import messagebox, ttk
 import mysql.connector
 import requests
+import os
 
 DB_CONFIG = {
-    "user": "root",
-    "password": "",
-    "host": "localhost",
-    "database": "vocab_manager",
+    "user": os.environ["DB_USER"],
+    "password": os.environ["DB_PASS"],
+    "host": os.environ["DB_HOST"],
+    "database": os.environ["DB_NAME"],
 }
 
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
@@ -31,22 +32,19 @@ def init_db():
 def fetch_meaning(word):
     url = f"{DICTIONARY_API_URL}{word.lower()}"
     response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        meanings = data[0]["meanings"][0]["definitions"][0]["definition"]
-        return meanings
-    else:
+    if response.status_code != 200:
         return None
+    data = response.json()
+    return data[0]["meanings"][0]["definitions"][0]["definition"]
 
 
 def fetch_full_details(word):
     url = f"{DICTIONARY_API_URL}{word.lower()}"
     response = requests.get(url)
-    if response.status_code == 200:
-        data = response.json()
-        return data[0]
-    else:
+    if response.status_code != 200:
         return None
+    data = response.json()
+    return data[0]
 
 
 def add_word():
@@ -59,11 +57,12 @@ def add_word():
 
     if not meaning:
         meaning = fetch_meaning(word)
-        if not meaning:
-            messagebox.showwarning(
-                "Fetch Error", "Could not fetch meaning from the dictionary"
-            )
-            return
+
+    if not meaning:
+        messagebox.showwarning(
+            "Fetch Error", "Could not fetch meaning from the dictionary"
+        )
+        return
 
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
@@ -73,8 +72,8 @@ def add_word():
     conn.commit()
     conn.close()
 
-    entry_word.delete(0, ttk.END)
-    entry_meaning.delete(0, ttk.END)
+    entry_word.delete(0, tk.END)
+    entry_meaning.delete(0, tk.END)
 
     messagebox.showinfo("Success", "Word added successfully")
     load_vocabulary()
@@ -103,8 +102,8 @@ def update_word():
     conn.commit()
     conn.close()
 
-    entry_word.delete(0, ttk.END)
-    entry_meaning.delete(0, ttk.END)
+    entry_word.delete(0, tk.END)
+    entry_meaning.delete(0, tk.END)
 
     messagebox.showinfo("Success", "Word updated successfully")
     load_vocabulary()
@@ -134,7 +133,7 @@ def load_vocabulary(search_term=""):
     if search_term:
         cursor.execute(
             "SELECT id, word, meaning FROM vocabulary WHERE word LIKE %s",
-            ("%" + search_term + "%",),
+            (f"%{search_term}%",),
         )
     else:
         cursor.execute("SELECT id, word, meaning FROM vocabulary")
@@ -146,7 +145,7 @@ def load_vocabulary(search_term=""):
         listbox_vocabulary.insert("", "end", values=word)
 
 
-def search_vocabulary():
+def search_vocabulary(event=None):
     search_term = entry_search.get()
     load_vocabulary(search_term)
 
@@ -166,11 +165,7 @@ def show_word_details(event):
         return
 
     word = listbox_vocabulary.item(selected_item)["values"][1]
-    details = fetch_full_details(word)
-
-    if not details:
-        detail_label.config(text="Unknown word")
-    else:
+    if details := fetch_full_details(word):
         detail_text = f"Word: {details['word']}\n\nPhonetic: {details.get('phonetic', 'N/A')}\n\nOrigin: {details.get('origin', 'N/A')}\n\nMeanings:\n"
 
         for meaning in details["meanings"]:
@@ -184,6 +179,8 @@ def show_word_details(event):
 
         detail_label.config(text=detail_text)
 
+    else:
+        detail_label.config(text="Unknown word")
     panel_width = int(root.winfo_width() * 0.25)
 
     if side_panel not in paned_window.panes():
@@ -201,14 +198,26 @@ root.state("zoomed")
 main_frame = ttk.Frame(root)
 main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
+# frame_search = ttk.Frame(main_frame)
+# frame_search.pack(fill=tk.X, pady=5)
+# lbl_search = ttk.Label(frame_search, text="Search:")
+# lbl_search.pack(side=tk.LEFT, padx=5)
+# entry_search = ttk.Entry(frame_search)
+# entry_search.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
+# btn_search = ttk.Button(frame_search, text="Search", command=search_vocabulary)
+# btn_search.pack(side=tk.LEFT, padx=5)
+
 frame_search = ttk.Frame(main_frame)
 frame_search.pack(fill=tk.X, pady=5)
+
 lbl_search = ttk.Label(frame_search, text="Search:")
 lbl_search.pack(side=tk.LEFT, padx=5)
+
 entry_search = ttk.Entry(frame_search)
 entry_search.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
-btn_search = ttk.Button(frame_search, text="Search", command=search_vocabulary)
-btn_search.pack(side=tk.LEFT, padx=5)
+entry_search.bind(
+    "<KeyRelease>", search_vocabulary
+)  # Bind KeyRelease event to search function
 
 paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
 paned_window.pack(fill=tk.BOTH, expand=True)
