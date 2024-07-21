@@ -189,6 +189,18 @@ def show_word_details(event):
     paned_window.sash_place(1, int(root.winfo_width() * 0.75), 0)
 
 
+def show_about():
+    copyright_text = (
+        "© 2024 Kayden Lee\n"
+        "All rights reserved.\n\n"
+        "This software and its contents are protected by copyright law. "
+        "Unauthorized reproduction or distribution of this software, or any portion of it, "
+        "may result in severe civil and criminal penalties, and will be prosecuted to the "
+        "maximum extent possible under the law."
+    )
+    messagebox.showinfo("Copyright Information", copyright_text)
+
+
 init_db()
 
 root = tk.Tk()
@@ -261,6 +273,20 @@ btn_delete.pack(side=tk.LEFT, padx=5)
 side_panel = ttk.Frame(paned_window)
 detail_label = ttk.Label(side_panel, text="", justify=tk.LEFT, anchor="nw")
 detail_label.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+menubar = tk.Menu(root)
+
+file = tk.Menu(menubar, tearoff=0)
+menubar.add_cascade(label="File", menu=file)
+file.add_command(label="Refresh Data", command=load_vocabulary)
+file.add_separator()
+file.add_command(label="Exit", command=root.destroy)
+
+edit = tk.Menu(menubar, tearoff=0)
+menubar.add_cascade(label="About", menu=edit)
+edit.add_command(label="Information", command=show_about)
+
+root.config(menu=menubar)
 
 load_vocabulary()
 
