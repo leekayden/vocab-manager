@@ -24,7 +24,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS vocabulary (
             id INT AUTO_INCREMENT PRIMARY KEY,
             word VARCHAR(255) NOT NULL,
-            meaning TEXT NOT NULL
+            meaning TEXT NOT NULL,
+            UNIQUE(word)
         )
     """
     )
@@ -65,16 +66,19 @@ def add_word(event=None):
 
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO vocabulary (word, meaning) VALUES (%s, %s)", (word, meaning)
-    )
-    conn.commit()
+    try:
+        cursor.execute(
+            "INSERT INTO vocabulary (word, meaning) VALUES (%s, %s)", (word, meaning)
+        )
+        conn.commit()
+        messagebox.showinfo("Success", "Word added successfully")
+    except mysql.connector.IntegrityError:
+        messagebox.showerror("Error", "Word already exists in the database")
     conn.close()
 
     entry_word.delete(0, tk.END)
     entry_meaning.delete(0, tk.END)
 
-    messagebox.showinfo("Success", "Word added successfully")
     load_vocabulary()
 
 def update_word():
@@ -189,9 +193,14 @@ def close_panel(event=None):
         side_panel.pack_forget()
 
 def search_dictionary():
+    selected_item = listbox_vocabulary.selection()
+    selected_word = ""
+    if selected_item:
+        selected_word = listbox_vocabulary.item(selected_item)["values"][1]
+    
     search_window = tk.Toplevel(root)
     search_window.title("Search Dictionary")
-    search_window.geometry("400x300")
+    search_window.geometry("600x400")
     search_window.resizable(False, False)
     search_window.attributes("-toolwindow", True)
     search_window.protocol("WM_DELETE_WINDOW", search_window.destroy)
@@ -200,6 +209,9 @@ def search_dictionary():
     lbl_search_word.pack(pady=10)
     entry_search_word = ttk.Entry(search_window)
     entry_search_word.pack(pady=10)
+    
+    if selected_word:
+        entry_search_word.insert(0, selected_word)
     
     def close_window(event=None):
         search_window.destroy()
@@ -243,8 +255,19 @@ def search_dictionary():
     search_window.bind("<Control-w>", close_window)
     search_window.bind("<Escape>", close_window)
 
+    if selected_word:
+        perform_search()
+
 def show_about():
-    messagebox.showinfo("About", "Vocabulary Manager v1.0\nDeveloped by [Your Name]")
+    copyright_text = (
+        "© 2024 Kayden Lee\n"
+        "All rights reserved.\n\n"
+        "This software and its contents are protected by copyright law. "
+        "Unauthorized reproduction or distribution of this software, or any portion of it, "
+        "may result in severe civil and criminal penalties, and will be prosecuted to the "
+        "maximum extent possible under the law."
+    )
+    messagebox.showinfo("Copyright Information", copyright_text)
 
 root = tk.Tk()
 root.title("Vocabulary Manager")
