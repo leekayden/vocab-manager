@@ -16,7 +16,6 @@ DB_CONFIG = {
 
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
 
-
 def init_db():
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
@@ -31,7 +30,6 @@ def init_db():
     )
     conn.close()
 
-
 def fetch_meaning(word):
     url = f"{DICTIONARY_API_URL}{word.lower()}"
     response = requests.get(url)
@@ -39,7 +37,6 @@ def fetch_meaning(word):
         return None
     data = response.json()
     return data[0]["meanings"][0]["definitions"][0]["definition"]
-
 
 def fetch_full_details(word):
     url = f"{DICTIONARY_API_URL}{word.lower()}"
@@ -49,15 +46,14 @@ def fetch_full_details(word):
     data = response.json()
     return data[0]
 
-
-def add_word():
+def add_word(event=None):
     word = entry_word.get()
     meaning = entry_meaning.get()
 
     if not word:
         messagebox.showwarning("Input Error", "Please fill in the word field")
         return
-
+    
     if not meaning:
         meaning = fetch_meaning(word)
 
@@ -80,7 +76,6 @@ def add_word():
 
     messagebox.showinfo("Success", "Word added successfully")
     load_vocabulary()
-
 
 def update_word():
     selected_item = listbox_vocabulary.selection()
@@ -111,7 +106,6 @@ def update_word():
     messagebox.showinfo("Success", "Word updated successfully")
     load_vocabulary()
 
-
 def delete_word(event=None):
     selected_item = listbox_vocabulary.selection()
     if not selected_item:
@@ -128,7 +122,6 @@ def delete_word(event=None):
 
     messagebox.showinfo("Success", "Word deleted successfully")
     load_vocabulary()
-
 
 def load_vocabulary(search_term=""):
     conn = mysql.connector.connect(**DB_CONFIG)
@@ -147,11 +140,9 @@ def load_vocabulary(search_term=""):
     for word in words:
         listbox_vocabulary.insert("", "end", values=word)
 
-
 def search_vocabulary(event=None):
     search_term = entry_search.get()
     load_vocabulary(search_term)
-
 
 def resize_columns(event):
     total_width = listbox_vocabulary.winfo_width()
@@ -159,12 +150,11 @@ def resize_columns(event):
     listbox_vocabulary.column("Word", width=int(total_width * 0.20))
     listbox_vocabulary.column("Meaning", width=int(total_width * 0.70))
 
-
 def show_word_details(event):
     selected_item = listbox_vocabulary.selection()
     if not selected_item:
-        if paned_window.panes() and side_panel in paned_window.panes():
-            paned_window.forget(side_panel)
+        if side_panel.winfo_ismapped():
+            side_panel.pack_forget()
         return
 
     word = listbox_vocabulary.item(selected_item)["values"][1]
@@ -181,58 +171,99 @@ def show_word_details(event):
                     detail_text += f"   Example: {definition['example']}\n"
 
         detail_label.config(text=detail_text)
-
     else:
         detail_label.config(text="Unknown word")
-    panel_width = int(root.winfo_width() * 0.25)
 
-    if side_panel not in paned_window.panes():
-        paned_window.add(side_panel)
-    paned_window.paneconfigure(side_panel, minsize=panel_width)
-    paned_window.sash_place(1, int(root.winfo_width() * 0.75), 0)
+    panel_width = int(root.winfo_width() * 0.10)  # Set to 10% of window width
+    if not side_panel.winfo_ismapped():
+        side_panel.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 5))
 
+    # Update the sash position
+    paned_window.sash_place(1, int(root.winfo_width() * 0.90), 0)
+
+def close_panel(event=None):
+    # Deselect any selected item
+    listbox_vocabulary.selection_remove(*listbox_vocabulary.selection())
+    # Hide the side panel
+    if side_panel.winfo_ismapped():
+        side_panel.pack_forget()
+
+def search_dictionary():
+    search_window = tk.Toplevel(root)
+    search_window.title("Search Dictionary")
+    search_window.geometry("400x300")
+    search_window.resizable(False, False)
+    search_window.attributes("-toolwindow", True)
+    search_window.protocol("WM_DELETE_WINDOW", search_window.destroy)
+
+    lbl_search_word = ttk.Label(search_window, text="Enter Word:")
+    lbl_search_word.pack(pady=10)
+    entry_search_word = ttk.Entry(search_window)
+    entry_search_word.pack(pady=10)
+    
+    def close_window(event=None):
+        search_window.destroy()
+
+    def perform_search(event=None):
+        word = entry_search_word.get()
+        details = fetch_full_details(word)
+        if details:
+            detail_text = f"Word: {details['word']}\n\nPhonetic: {details.get('phonetic', 'N/A')}\n\nOrigin: {details.get('origin', 'N/A')}\n\nMeanings:\n"
+            for meaning in details["meanings"]:
+                part_of_speech = meaning.get("partOfSpeech", "N/A")
+                definitions = meaning["definitions"]
+                detail_text += f"\nPart of Speech: {part_of_speech}\n"
+                for definition in definitions:
+                    detail_text += f" - {definition['definition']}\n"
+                    if "example" in definition:
+                        detail_text += f"   Example: {definition['example']}\n"
+        else:
+            detail_text = "Unknown word"
+
+        result_text.config(state=tk.NORMAL)
+        result_text.delete(1.0, tk.END)
+        result_text.insert(tk.END, detail_text)
+        result_text.config(state=tk.DISABLED)
+
+    btn_search_word = ttk.Button(search_window, text="Search", command=perform_search)
+    btn_search_word.pack(pady=10)
+
+    result_frame = ttk.Frame(search_window)
+    result_frame.pack(fill=tk.BOTH, expand=True)
+
+    result_text = tk.Text(result_frame, wrap=tk.WORD, height=10)
+    result_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+    result_text.config(state=tk.DISABLED)
+
+    scrollbar = ttk.Scrollbar(result_frame, orient=tk.VERTICAL, command=result_text.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    result_text.config(yscrollcommand=scrollbar.set)
+
+    entry_search_word.bind("<Return>", perform_search)
+    search_window.bind("<Control-w>", close_window)
+    search_window.bind("<Escape>", close_window)
 
 def show_about():
-    copyright_text = (
-        "© 2024 Kayden Lee\n"
-        "All rights reserved.\n\n"
-        "This software and its contents are protected by copyright law. "
-        "Unauthorized reproduction or distribution of this software, or any portion of it, "
-        "may result in severe civil and criminal penalties, and will be prosecuted to the "
-        "maximum extent possible under the law."
-    )
-    messagebox.showinfo("Copyright Information", copyright_text)
-
-
-init_db()
+    messagebox.showinfo("About", "Vocabulary Manager v1.0\nDeveloped by [Your Name]")
 
 root = tk.Tk()
 root.title("Vocabulary Manager")
-root.state("zoomed")
+root.geometry("800x600")
+root.state("zoomed")  # Start the window maximized
+root.resizable(True, True)
+
+init_db()
 
 main_frame = ttk.Frame(root)
-main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-
-# frame_search = ttk.Frame(main_frame)
-# frame_search.pack(fill=tk.X, pady=5)
-# lbl_search = ttk.Label(frame_search, text="Search:")
-# lbl_search.pack(side=tk.LEFT, padx=5)
-# entry_search = ttk.Entry(frame_search)
-# entry_search.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
-# btn_search = ttk.Button(frame_search, text="Search", command=search_vocabulary)
-# btn_search.pack(side=tk.LEFT, padx=5)
+main_frame.pack(fill=tk.BOTH, expand=True)
 
 frame_search = ttk.Frame(main_frame)
 frame_search.pack(fill=tk.X, pady=5)
-
 lbl_search = ttk.Label(frame_search, text="Search:")
 lbl_search.pack(side=tk.LEFT, padx=5)
-
 entry_search = ttk.Entry(frame_search)
 entry_search.pack(fill=tk.X, expand=True, side=tk.LEFT, padx=5)
-entry_search.bind(
-    "<KeyRelease>", search_vocabulary
-)  # Bind KeyRelease event to search function
+entry_search.bind("<KeyRelease>", search_vocabulary)
 
 paned_window = ttk.PanedWindow(main_frame, orient=tk.HORIZONTAL)
 paned_window.pack(fill=tk.BOTH, expand=True)
@@ -251,9 +282,7 @@ listbox_vocabulary.column("Meaning", anchor="w", width=int(frame.winfo_width() *
 listbox_vocabulary.pack(fill=tk.BOTH, expand=True, pady=10)
 
 listbox_vocabulary.bind("<Delete>", delete_word)
-
 listbox_vocabulary.bind("<<TreeviewSelect>>", show_word_details)
-
 listbox_vocabulary.bind("<Configure>", resize_columns)
 
 frame_add = ttk.Frame(main_frame)
@@ -262,10 +291,12 @@ lbl_word = ttk.Label(frame_add, text="Word:")
 lbl_word.pack(side=tk.LEFT, padx=5)
 entry_word = ttk.Entry(frame_add)
 entry_word.pack(side=tk.LEFT, padx=5)
+entry_word.bind("<Return>", add_word)
 lbl_meaning = ttk.Label(frame_add, text="Meaning:")
 lbl_meaning.pack(side=tk.LEFT, padx=5)
 entry_meaning = ttk.Entry(frame_add)
 entry_meaning.pack(side=tk.LEFT, padx=5)
+entry_meaning.bind("<Return>", add_word)
 btn_add = ttk.Button(frame_add, text="Add Word", command=add_word)
 btn_add.pack(side=tk.LEFT, padx=5)
 btn_update = ttk.Button(frame_add, text="Update Word", command=update_word)
@@ -274,8 +305,15 @@ btn_delete = ttk.Button(frame_add, text="Delete Word", command=delete_word)
 btn_delete.pack(side=tk.LEFT, padx=5)
 
 side_panel = ttk.Frame(paned_window)
-detail_label = ttk.Label(side_panel, text="", justify=tk.LEFT, anchor="nw")
-detail_label.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+canvas = tk.Canvas(side_panel)
+scroll_y = ttk.Scrollbar(side_panel, orient="vertical", command=canvas.yview)
+scroll_y.pack(side=tk.RIGHT, fill=tk.Y)
+canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+canvas.configure(yscrollcommand=scroll_y.set)
+scroll_y.config(command=canvas.yview)
+
+detail_label = ttk.Label(canvas, text="", justify=tk.LEFT, anchor="nw")
+canvas.create_window((0, 0), window=detail_label, anchor="nw")
 
 menubar = tk.Menu(root)
 
@@ -289,8 +327,14 @@ edit = tk.Menu(menubar, tearoff=0)
 menubar.add_cascade(label="About", menu=edit)
 edit.add_command(label="Information", command=show_about)
 
+tools = tk.Menu(menubar, tearoff=0)
+menubar.add_cascade(label="Tools", menu=tools)
+tools.add_command(label="Search Dictionary", command=search_dictionary)
+
 root.config(menu=menubar)
 
 load_vocabulary()
+
+root.bind("<Escape>", close_panel)
 
 root.mainloop()

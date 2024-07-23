@@ -50,3 +50,4 @@ def add_word():
 
 while True:
     add_word()
+
