@@ -47,6 +47,8 @@ def add_word():
     )
     conn.commit()
     conn.close()
+    
+    print(meaning)
 
 while True:
     add_word()
