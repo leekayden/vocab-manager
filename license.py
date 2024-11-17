@@ -3,6 +3,7 @@ from tkinter import messagebox, ttk
 import mysql.connector
 import requests
 import os
+import uuid
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -18,45 +19,55 @@ DB_CONFIG = {
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
 
 
+def generate_machine_id():
+    """Generate a unique identifier for the current machine using its MAC address."""
+    return ":".join(
+        [
+            "{:02x}".format((uuid.getnode() >> elements) & 0xFF)
+            for elements in range(0, 2 * 6, 2)
+        ][::-1]
+    )
+
+
+MACHINE_ID = generate_machine_id()
+
+
 def init_db():
     """Initialize the database schema with the required tables."""
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
     # Create vocabulary table
-    cursor.execute(
-        """
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS vocabulary (
             id INT AUTO_INCREMENT PRIMARY KEY,
             word VARCHAR(255) NOT NULL,
             meaning TEXT NOT NULL,
             UNIQUE(word)
         )
-    """
-    )
+    """)
 
-    # Create license_keys table with expiry feature
-    cursor.execute(
-        """
+    # Create license_keys table with machine_id feature
+    cursor.execute("""
         CREATE TABLE IF NOT EXISTS license_keys (
             key_id INT AUTO_INCREMENT PRIMARY KEY,
             license_key VARCHAR(255) NOT NULL UNIQUE,
+            machine_id VARCHAR(255),
             status ENUM('active', 'used', 'revoked') NOT NULL DEFAULT 'active',
             expiry_date DATE DEFAULT NULL
         )
-    """
-    )
+    """)
 
     conn.close()
 
 
 def validate_license_key(license_key):
-    """Validate the license key and check for expiry."""
+    """Validate the license key and ensure it matches the machine."""
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT status, expiry_date FROM license_keys WHERE license_key = %s",
+        "SELECT status, expiry_date, machine_id FROM license_keys WHERE license_key = %s",
         (license_key,),
     )
     result = cursor.fetchone()
@@ -65,43 +76,107 @@ def validate_license_key(license_key):
         conn.close()
         return False, "Invalid license key."
 
-    status, expiry_date = result
+    status, expiry_date, machine_id = result
 
     # Check status
-    if status == "revoked":
+    if status != "active":
         conn.close()
-        return False, "License key has been revoked."
-    elif status == "used":
+        return False, "License key is not active. Please contact support."
+    elif machine_id and machine_id != MACHINE_ID:
         conn.close()
-        return False, "License key has already been used."
+        return False, "License key is already linked to another machine."
 
     # Check expiry
     if expiry_date and datetime.strptime(expiry_date, "%Y-%m-%d") < datetime.now():
         conn.close()
         return False, "License key has expired."
 
-    # Mark as used if valid
+    # Mark as used and associate with the machine if valid
     cursor.execute(
-        "UPDATE license_keys SET status = 'used' WHERE license_key = %s", (license_key,)
+        "UPDATE license_keys SET status = 'used', machine_id = %s WHERE license_key = %s",
+        (MACHINE_ID, license_key),
     )
     conn.commit()
     conn.close()
-    return True, "License key validated successfully."
+    return True, "License key validated successfully and linked to this machine."
 
 
-# License Key Entry UI
-def show_license_key_entry():
-    conn = mysql.connector.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT license_key, status, expiry_date FROM license_keys WHERE status IN ('active', 'used')"
-    )
-    rows = cursor.fetchall()
-    conn.close()
+def fetch_meaning(word):
+    """Fetch the meaning of a word using the dictionary API."""
+    url = f"{DICTIONARY_API_URL}{word.lower()}"
+    response = requests.get(url)
+    if response.status_code != 200:
+        return None
+    data = response.json()
+    return data[0]["meanings"][0]["definitions"][0]["definition"]
 
-    if rows:
+
+def add_word():
+    """Add a new word and its meaning to the database."""
+    word = entry_word.get().strip()
+    meaning = entry_meaning.get().strip()
+
+    if not word:
+        messagebox.showwarning("Input Error", "Please provide a word.")
         return
 
+    if not meaning:
+        set_cursor("wait")  # Show loading cursor
+        meaning = fetch_meaning(word)
+        set_cursor("")  # Reset cursor
+        if not meaning:
+            messagebox.showwarning(
+                "Fetch Error", "Could not fetch meaning from the dictionary."
+            )
+            return
+
+    try:
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        set_cursor("wait")  # Show loading cursor
+        cursor.execute(
+            "INSERT INTO vocabulary (word, meaning) VALUES (%s, %s)", (word, meaning)
+        )
+        conn.commit()
+        conn.close()
+        set_cursor("")  # Reset cursor
+        messagebox.showinfo("Success", f"'{word}' added successfully!")
+        entry_word.delete(0, tk.END)
+        entry_meaning.delete(0, tk.END)
+        load_vocabulary()
+    except mysql.connector.IntegrityError:
+        set_cursor("")  # Reset cursor
+        messagebox.showerror("Error", "Word already exists in the database.")
+
+
+def load_vocabulary(search_term=""):
+    """Load vocabulary words and meanings into the Treeview."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    query = "SELECT word, meaning FROM vocabulary"
+    if search_term:
+        query += " WHERE word LIKE %s"
+        cursor.execute(query, (f"%{search_term}%",))
+    else:
+        cursor.execute(query)
+    words = cursor.fetchall()
+    conn.close()
+
+    for row in tree_vocabulary.get_children():
+        tree_vocabulary.delete(row)
+
+    for word in words:
+        tree_vocabulary.insert("", "end", values=word)
+
+
+def set_cursor(cursor_type):
+    """Set the cursor type for the application."""
+    root.config(cursor=cursor_type)
+    root.update_idletasks()
+
+
+def show_license_key_entry():
+    """Prompt user to enter a license key for validation."""
     def submit_key():
         license_key = entry_license.get().strip()
         valid, message = validate_license_key(license_key)
@@ -171,79 +246,7 @@ def check_db_connection():
         messagebox.showerror("Database Connection", f"Database connection failed: {e}")
 
 
-def set_cursor(cursor_type):
-    """Set the cursor type for the application."""
-    root.config(cursor=cursor_type)
-    root.update_idletasks()
-
-
-# Functionality for fetching meaning, adding, deleting words (same as before)
-def fetch_meaning(word):
-    url = f"{DICTIONARY_API_URL}{word.lower()}"
-    response = requests.get(url)
-    if response.status_code != 200:
-        return None
-    data = response.json()
-    return data[0]["meanings"][0]["definitions"][0]["definition"]
-
-
-def add_word():
-    word = entry_word.get().strip()
-    meaning = entry_meaning.get().strip()
-
-    if not word:
-        messagebox.showwarning("Input Error", "Please provide a word.")
-        return
-
-    if not meaning:
-        set_cursor("wait")  # Show loading cursor
-        meaning = fetch_meaning(word)
-        set_cursor("")  # Reset cursor
-        if not meaning:
-            messagebox.showwarning(
-                "Fetch Error", "Could not fetch meaning from the dictionary."
-            )
-            return
-
-    try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        set_cursor("wait")  # Show loading cursor
-        cursor.execute(
-            "INSERT INTO vocabulary (word, meaning) VALUES (%s, %s)", (word, meaning)
-        )
-        conn.commit()
-        conn.close()
-        set_cursor("")  # Reset cursor
-        messagebox.showinfo("Success", f"'{word}' added successfully!")
-        entry_word.delete(0, tk.END)
-        entry_meaning.delete(0, tk.END)
-        load_vocabulary()
-    except mysql.connector.IntegrityError:
-        set_cursor("")  # Reset cursor
-        messagebox.showerror("Error", "Word already exists in the database.")
-
-
-def load_vocabulary(search_term=""):
-    conn = mysql.connector.connect(**DB_CONFIG)
-    cursor = conn.cursor()
-    query = "SELECT word, meaning FROM vocabulary"
-    if search_term:
-        query += " WHERE word LIKE %s"
-        cursor.execute(query, (f"%{search_term}%",))
-    else:
-        cursor.execute(query)
-    words = cursor.fetchall()
-    conn.close()
-
-    for row in tree_vocabulary.get_children():
-        tree_vocabulary.delete(row)
-
-    for word in words:
-        tree_vocabulary.insert("", "end", values=word)
-
-
-# Initialize root window
+# Main Application Window
 root = tk.Tk()
 root.title("Vocabulary Manager")
 root.geometry("900x600")
@@ -254,6 +257,7 @@ menubar = tk.Menu(root)
 
 # License Menu
 license_menu = tk.Menu(menubar, tearoff=0)
+license_menu.add_command(label="Enter License Key", command=show_license_key_entry)
 license_menu.add_command(label="Check Activation Status", command=show_license_status)
 menubar.add_cascade(label="License", menu=license_menu)
 
@@ -270,33 +274,21 @@ menubar.add_cascade(label="About", menu=about_menu)
 
 root.config(menu=menubar)
 
-# Configure theme
+# Configure Treeview
 style = ttk.Style()
 style.theme_use("clam")
 style.configure("Treeview", font=("Arial", 10), rowheight=30)
 style.configure("Treeview.Heading", font=("Arial", 12, "bold"))
-style.configure(".", font=("Arial", 11))
 
-# Search Frame
-frame_search = ttk.Frame(root, padding=10)
-frame_search.pack(fill=tk.X)
-
-ttk.Label(frame_search, text="Search:").pack(side=tk.LEFT, padx=5)
-entry_search = ttk.Entry(frame_search)
-entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
-ttk.Button(
-    frame_search, text="Search", command=lambda: load_vocabulary(entry_search.get())
-).pack(side=tk.LEFT, padx=5)
-
-# Vocabulary Treeview
 columns = ("Word", "Meaning")
 tree_vocabulary = ttk.Treeview(root, columns=columns, show="headings")
 tree_vocabulary.heading("Word", text="Word")
 tree_vocabulary.heading("Meaning", text="Meaning")
-tree_vocabulary.column("Word", width=200, anchor="w")
+tree_vocabulary.column("Word", width=100, anchor="w")
 tree_vocabulary.column("Meaning", width=650, anchor="w")
 tree_vocabulary.pack(fill=tk.BOTH, expand=True, pady=10)
 
+# Scrollbar for Treeview
 scrollbar = ttk.Scrollbar(root, orient=tk.VERTICAL, command=tree_vocabulary.yview)
 tree_vocabulary.configure(yscrollcommand=scrollbar.set)
 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -314,10 +306,9 @@ entry_meaning.pack(side=tk.LEFT, padx=5)
 
 ttk.Button(frame_input, text="Add Word", command=add_word).pack(side=tk.LEFT, padx=5)
 
-# Load initial vocabulary
+# Initialize and Run Application
 init_db()
 show_license_key_entry()
 load_vocabulary()
 
-# Start main loop
 root.mainloop()
