@@ -168,6 +168,28 @@ def add_word():
         messagebox.showerror("Error", "Word already exists in the database.")
 
 
+def on_search():
+    search_term = entry_search.get().strip()
+    load_vocabulary(search_term)
+
+
+def delete_word():
+    selected_item = tree_vocabulary.selection()
+    if not selected_item:
+        messagebox.showwarning("Selection Error", "Please select a word to delete.")
+        return
+
+    word = tree_vocabulary.item(selected_item, "values")[0]
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM vocabulary WHERE word = %s", (word,))
+    conn.commit()
+    conn.close()
+
+    messagebox.showinfo("Success", "Word deleted successfully.")
+    load_vocabulary()
+
+
 def load_vocabulary(search_term=""):
     """Load vocabulary words and meanings into the Treeview."""
     conn = mysql.connector.connect(**DB_CONFIG)
@@ -234,15 +256,88 @@ def show_license_key_entry():
     license_window.geometry("400x200")
     license_window.resizable(False, False)
 
-    tk.Label(license_window, text="Enter your license key:", font=("Arial", 12)).pack(
+    tk.Label(license_window, text="Enter your license key:", font=("Verdana", 12)).pack(
         pady=10
     )
-    entry_license = ttk.Entry(license_window, font=("Arial", 12))
+    entry_license = ttk.Entry(license_window, font=("Verdana", 12))
     entry_license.pack(pady=5, padx=10, fill=tk.X)
 
     ttk.Button(license_window, text="Submit", command=submit_key).pack(pady=10)
 
     license_window.protocol("WM_DELETE_WINDOW", root.destroy)
+
+
+def fetch_all_definitions(word):
+    """Fetch all available definitions of a word using the dictionary API."""
+    url = f"{DICTIONARY_API_URL}{word.lower()}"
+    response = requests.get(url)
+    if response.status_code != 200:
+        return None
+    data = response.json()
+
+    # Extract all definitions
+    definitions = []
+    for meaning in data[0]["meanings"]:
+        part_of_speech = meaning.get("partOfSpeech", "Unknown")
+        for definition in meaning["definitions"]:
+            definitions.append(
+                {"partOfSpeech": part_of_speech, "definition": definition["definition"]}
+            )
+    return definitions
+
+
+def view_definitions():
+    """Display all definitions for the selected word in a popup window."""
+    selected_item = tree_vocabulary.selection()
+    if not selected_item:
+        messagebox.showwarning(
+            "Selection Error", "Please select a word to view its definitions."
+        )
+        return
+
+    word = tree_vocabulary.item(selected_item, "values")[0]
+    definitions = fetch_all_definitions(word)
+
+    if not definitions:
+        messagebox.showerror(
+            "Error", "Could not fetch definitions for the selected word."
+        )
+        return
+
+    # Create a popup window
+    definitions_window = tk.Toplevel(root)
+    definitions_window.title(f"Definitions of '{word}'")
+    definitions_window.geometry("500x400")
+    definitions_window.resizable(True, True)
+
+    ttk.Label(
+        definitions_window,
+        text=f"{word}",
+        font=("Verdana", 14, "bold"),
+    ).pack(pady=10)
+
+    # Create a scrollable text widget to display definitions
+    frame = ttk.Frame(definitions_window)
+    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    text_widget = tk.Text(frame, wrap=tk.WORD, font=("Verdana", 12))
+    text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text_widget.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    text_widget.config(yscrollcommand=scrollbar.set)
+
+    # Insert definitions into the text widget
+    for idx, definition in enumerate(definitions, start=1):
+        part_of_speech = definition["partOfSpeech"]
+        definition_text = definition["definition"]
+        text_widget.insert(tk.END, f"{idx}. ({part_of_speech}) {definition_text}\n\n")
+
+    text_widget.config(state=tk.DISABLED)  # Make the text widget read-only
+
+    ttk.Button(
+        definitions_window, text="Close", command=definitions_window.destroy
+    ).pack(pady=10)
 
 
 def show_license_status():
@@ -286,11 +381,22 @@ def check_db_connection():
         messagebox.showerror("Database Connection", f"Database connection failed: {e}")
 
 
+def adjust_column_widths(event):
+    """Adjust column widths based on Treeview width."""
+    total_width = tree_vocabulary.winfo_width()
+    word_width = int(total_width * 0.2)
+    meaning_width = int(total_width * 0.8)
+
+    tree_vocabulary.column("Word", width=word_width)
+    tree_vocabulary.column("Meaning", width=meaning_width)
+
+
 # Main Application Window
 root = tk.Tk()
 root.title("Vocabulary Manager")
 root.geometry("900x600")
 root.iconbitmap("32x32.ico")
+root.option_add("*Font", "Verdana 10")
 
 # Menu Bar
 menubar = tk.Menu(root)
@@ -317,21 +423,33 @@ root.config(menu=menubar)
 # Configure Treeview
 style = ttk.Style()
 style.theme_use("clam")
-style.configure("Treeview", font=("Arial", 10), rowheight=30)
-style.configure("Treeview.Heading", font=("Arial", 12, "bold"))
+style.configure("Treeview", font=("Verdana", 10), rowheight=30)
+style.configure("Treeview.Heading", font=("Verdana", 12, "bold"))
 
 columns = ("Word", "Meaning")
 tree_vocabulary = ttk.Treeview(root, columns=columns, show="headings")
 tree_vocabulary.heading("Word", text="Word")
 tree_vocabulary.heading("Meaning", text="Meaning")
-tree_vocabulary.column("Word", width=100, anchor="w")
-tree_vocabulary.column("Meaning", width=650, anchor="w")
+tree_vocabulary.column("Word", anchor="w")
+tree_vocabulary.column("Meaning", anchor="w")
 tree_vocabulary.pack(fill=tk.BOTH, expand=True, pady=10)
+
+# Bind the resize event to adjust column widths dynamically
+tree_vocabulary.bind("<Configure>", adjust_column_widths)
 
 # Scrollbar for Treeview
 scrollbar = ttk.Scrollbar(root, orient=tk.VERTICAL, command=tree_vocabulary.yview)
 tree_vocabulary.configure(yscrollcommand=scrollbar.set)
 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+# Search Frame
+frame_search = ttk.Frame(root, padding=10)
+frame_search.pack(fill=tk.X)
+
+ttk.Label(frame_search, text="Search:").pack(side=tk.LEFT, padx=5)
+entry_search = ttk.Entry(frame_search)
+entry_search.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+ttk.Button(frame_search, text="Search", command=on_search).pack(side=tk.LEFT, padx=5)
 
 # Input Frame
 frame_input = ttk.Frame(root, padding=10)
@@ -345,6 +463,12 @@ entry_meaning = ttk.Entry(frame_input, width=50)
 entry_meaning.pack(side=tk.LEFT, padx=5)
 
 ttk.Button(frame_input, text="Add Word", command=add_word).pack(side=tk.LEFT, padx=5)
+ttk.Button(frame_input, text="Delete Word", command=delete_word).pack(
+    side=tk.LEFT, padx=5
+)
+ttk.Button(frame_input, text="View Definitions", command=view_definitions).pack(
+    side=tk.LEFT, padx=5
+)
 
 # Initialize and Run Application
 init_db()
