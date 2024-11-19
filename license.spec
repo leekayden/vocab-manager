@@ -4,7 +4,7 @@
 a = Analysis(
     ['license.py'],
     pathex=[],
-    binaries=[('32x32.ico', '.')],
+    binaries=[],
     datas=[],
     hiddenimports=[],
     hookspath=[],
@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon='NONE',
 )
