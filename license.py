@@ -38,17 +38,20 @@ def init_db():
     cursor = conn.cursor()
 
     # Create vocabulary table
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS vocabulary (
             id INT AUTO_INCREMENT PRIMARY KEY,
             word VARCHAR(255) NOT NULL,
             meaning TEXT NOT NULL,
             UNIQUE(word)
         )
-    """)
+    """
+    )
 
     # Create license_keys table with machine_id feature
-    cursor.execute("""
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS license_keys (
             key_id INT AUTO_INCREMENT PRIMARY KEY,
             license_key VARCHAR(255) NOT NULL UNIQUE,
@@ -56,7 +59,8 @@ def init_db():
             status ENUM('active', 'used', 'revoked') NOT NULL DEFAULT 'active',
             expiry_date DATE DEFAULT NULL
         )
-    """)
+    """
+    )
 
     conn.close()
 
@@ -66,6 +70,21 @@ def validate_license_key(license_key):
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
+    # Check if the current machine has a used license
+    cursor.execute(
+        "SELECT license_key FROM license_keys WHERE machine_id = %s AND status = 'used'",
+        (MACHINE_ID,),
+    )
+    used_license = cursor.fetchone()
+
+    if used_license:
+        conn.close()
+        return (
+            True,
+            "Machine is already associated with a used license, skipping validation.",
+        )
+
+    # Proceed with regular license validation
     cursor.execute(
         "SELECT status, expiry_date, machine_id FROM license_keys WHERE license_key = %s",
         (license_key,),
@@ -81,7 +100,7 @@ def validate_license_key(license_key):
     # Check status
     if status != "active":
         conn.close()
-        return False, "License key is not active. Please contact support."
+        return False, "License key is not active."
     elif machine_id and machine_id != MACHINE_ID:
         conn.close()
         return False, "License key is already linked to another machine."
@@ -176,7 +195,28 @@ def set_cursor(cursor_type):
 
 
 def show_license_key_entry():
-    """Prompt user to enter a license key for validation."""
+    """Prompt user to enter a license key for validation or skip if already validated."""
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    # Check if the machine already has a valid license
+    cursor.execute(
+        "SELECT status FROM license_keys WHERE machine_id = %s AND status IN ('active', 'used')",
+        (MACHINE_ID,),
+    )
+    result = cursor.fetchone()
+    conn.close()
+
+    if result:
+        # If a valid license is found, skip the license key input
+        # messagebox.showinfo(
+        #     "License Validation",
+        #     "Machine is already associated with a valid license. Access granted.",
+        # )
+        root.deiconify()  # Show the main application window
+        return
+
+    # Prompt for license key if no valid license is associated
     def submit_key():
         license_key = entry_license.get().strip()
         valid, message = validate_license_key(license_key)
