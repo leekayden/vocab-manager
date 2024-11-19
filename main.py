@@ -143,11 +143,11 @@ def add_word():
         set_cursor("wait")  # Show loading cursor
         meaning = fetch_meaning(word)
         set_cursor("")  # Reset cursor
-        if not meaning:
-            messagebox.showwarning(
-                "Fetch Error", "Could not fetch meaning from the dictionary."
-            )
-            return
+    if not meaning:
+        messagebox.showwarning(
+            "Fetch Error", "Could not fetch meaning from the dictionary."
+        )
+        return
 
     try:
         conn = mysql.connector.connect(**DB_CONFIG)
@@ -279,10 +279,13 @@ def fetch_all_definitions(word):
     definitions = []
     for meaning in data[0]["meanings"]:
         part_of_speech = meaning.get("partOfSpeech", "Unknown")
-        for definition in meaning["definitions"]:
-            definitions.append(
-                {"partOfSpeech": part_of_speech, "definition": definition["definition"]}
-            )
+        definitions.extend(
+            {
+                "partOfSpeech": part_of_speech,
+                "definition": definition["definition"],
+            }
+            for definition in meaning["definitions"]
+        )
     return definitions
 
 
