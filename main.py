@@ -22,10 +22,9 @@ DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
 def generate_machine_id():
     """Generate a unique identifier for the current machine using its MAC address."""
     return ":".join(
-        [
-            "{:02x}".format((uuid.getnode() >> elements) & 0xFF)
-            for elements in range(0, 2 * 6, 2)
-        ][::-1]
+        ["{:02x}".format((uuid.getnode() >> ele) & 0xFF) for ele in range(0, 8 * 6, 8)][
+            ::-1
+        ]
     )
 
 
@@ -130,7 +129,7 @@ def fetch_meaning(word):
     return data[0]["meanings"][0]["definitions"][0]["definition"]
 
 
-def add_word():
+def add_word(event=None):
     """Add a new word and its meaning to the database."""
     word = entry_word.get().strip()
     meaning = entry_meaning.get().strip()
@@ -139,38 +138,106 @@ def add_word():
         messagebox.showwarning("Input Error", "Please provide a word.")
         return
 
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+
+    # Check if the word already exists
+    cursor.execute("SELECT COUNT(*) FROM vocabulary WHERE word = %s", (word,))
+    exists = cursor.fetchone()[0]
+
+    if exists:
+        conn.close()
+        messagebox.showerror(
+            "Error", f"The word '{word}' already exists in the database."
+        )
+        return
+
     if not meaning:
         set_cursor("wait")  # Show loading cursor
         meaning = fetch_meaning(word)
         set_cursor("")  # Reset cursor
-    if not meaning:
-        messagebox.showwarning(
-            "Fetch Error", "Could not fetch meaning from the dictionary."
-        )
-        return
+        if not meaning:
+            messagebox.showwarning(
+                "Fetch Error", "Could not fetch meaning from the dictionary."
+            )
+            conn.close()
+            return
 
     try:
-        conn = mysql.connector.connect(**DB_CONFIG)
-        cursor = conn.cursor()
-        set_cursor("wait")  # Show loading cursor
         cursor.execute(
             "INSERT INTO vocabulary (word, meaning) VALUES (%s, %s)", (word, meaning)
         )
         conn.commit()
         conn.close()
-        set_cursor("")  # Reset cursor
         messagebox.showinfo("Success", f"'{word}' added successfully!")
         entry_word.delete(0, tk.END)
         entry_meaning.delete(0, tk.END)
         load_vocabulary()
-    except mysql.connector.IntegrityError:
-        set_cursor("")  # Reset cursor
-        messagebox.showerror("Error", "Word already exists in the database.")
+    except mysql.connector.Error as e:
+        conn.close()
+        messagebox.showerror("Database Error", f"An error occurred: {e}")
 
 
-def on_search():
-    search_term = entry_search.get().strip()
-    load_vocabulary(search_term)
+def edit_word():
+    """Edit the selected word and update the database."""
+    selected_item = tree_vocabulary.selection()
+    if not selected_item:
+        messagebox.showwarning("Selection Error", "Please select a word to edit.")
+        return
+
+    word = tree_vocabulary.item(selected_item, "values")[0]
+
+    # Prompt user for new word and meaning
+    edit_window = tk.Toplevel(root)
+    edit_window.title("Edit Word")
+    edit_window.geometry("400x200")
+
+    ttk.Label(edit_window, text="Word:").pack(pady=5)
+    entry_new_word = ttk.Entry(edit_window, font=("Verdana", 12))
+    entry_new_word.pack(pady=5, padx=10, fill=tk.X)
+    entry_new_word.insert(0, word)
+
+    ttk.Label(edit_window, text="Meaning:").pack(pady=5)
+    entry_new_meaning = ttk.Entry(edit_window, font=("Verdana", 12))
+    entry_new_meaning.pack(pady=5, padx=10, fill=tk.X)
+
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("SELECT meaning FROM vocabulary WHERE word = %s", (word,))
+    old_meaning = cursor.fetchone()
+    if old_meaning:
+        entry_new_meaning.insert(0, old_meaning[0])
+    conn.close()
+
+    def save_changes():
+        new_word = entry_new_word.get().strip()
+        new_meaning = entry_new_meaning.get().strip()
+
+        if not new_word or not new_meaning:
+            messagebox.showwarning(
+                "Input Error", "Both Word and Meaning fields must be filled."
+            )
+            return
+
+        conn = mysql.connector.connect(**DB_CONFIG)
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "UPDATE vocabulary SET word = %s, meaning = %s WHERE word = %s",
+                (new_word, new_meaning, word),
+            )
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("Success", "Word updated successfully!")
+            edit_window.destroy()
+            load_vocabulary()
+        except mysql.connector.IntegrityError:
+            conn.close()
+            messagebox.showerror("Error", "This word already exists in the database.")
+
+    ttk.Button(edit_window, text="Save Changes", command=save_changes).pack(pady=10)
+
+    edit_window.protocol("WM_DELETE_WINDOW", edit_window.destroy)
 
 
 def delete_word():
@@ -188,6 +255,11 @@ def delete_word():
 
     messagebox.showinfo("Success", "Word deleted successfully.")
     load_vocabulary()
+
+
+def on_search():
+    search_term = entry_search.get().strip()
+    load_vocabulary(search_term)
 
 
 def load_vocabulary(search_term=""):
@@ -344,26 +416,27 @@ def view_definitions():
 
 
 def show_license_status():
-    """Display the current activation and license status."""
+    """Display the license status linked to the current machine."""
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT license_key, status, expiry_date FROM license_keys WHERE status IN ('active', 'used')"
+        "SELECT license_key, status, expiry_date FROM license_keys WHERE machine_id = %s",
+        (MACHINE_ID,),
     )
-    rows = cursor.fetchall()
+    row = cursor.fetchone()
     conn.close()
 
-    if not rows:
-        messagebox.showinfo("License Status", "No active or used licenses found.")
+    if not row:
+        messagebox.showinfo(
+            "License Status", "No active or used license found for this machine."
+        )
         return
 
-    message = ""
-    for license_key, status, expiry_date in rows:
-        expiry_text = "No expiry" if expiry_date is None else expiry_date
-        message += f"Key: {license_key}\nStatus: {status}\nExpiry: {expiry_text}\n\n"
-
-    messagebox.showinfo("License Status", message.strip())
+    license_key, status, expiry_date = row
+    expiry_text = "No expiry" if expiry_date is None else expiry_date
+    message = f"License Key: {license_key}\nStatus: {status}\nExpiry: {expiry_text}"
+    messagebox.showinfo("License Status", message)
 
 
 def show_about():
@@ -394,6 +467,11 @@ def adjust_column_widths(event):
     tree_vocabulary.column("Meaning", width=meaning_width)
 
 
+def clear_selection(event=None):
+    """Clear the current selection in the Treeview."""
+    tree_vocabulary.selection_remove(tree_vocabulary.selection())
+
+
 # Main Application Window
 root = tk.Tk()
 root.title("Vocabulary Manager")
@@ -406,7 +484,6 @@ menubar = tk.Menu(root)
 
 # License Menu
 license_menu = tk.Menu(menubar, tearoff=0)
-license_menu.add_command(label="Enter License Key", command=show_license_key_entry)
 license_menu.add_command(label="Check Activation Status", command=show_license_status)
 menubar.add_cascade(label="License", menu=license_menu)
 
@@ -440,6 +517,9 @@ tree_vocabulary.pack(fill=tk.BOTH, expand=True, pady=10)
 # Bind the resize event to adjust column widths dynamically
 tree_vocabulary.bind("<Configure>", adjust_column_widths)
 
+# Bind the Escape key to clear the selection
+tree_vocabulary.bind("<Escape>", clear_selection)
+
 # Scrollbar for Treeview
 scrollbar = ttk.Scrollbar(root, orient=tk.VERTICAL, command=tree_vocabulary.yview)
 tree_vocabulary.configure(yscrollcommand=scrollbar.set)
@@ -461,11 +541,15 @@ frame_input.pack(fill=tk.X)
 ttk.Label(frame_input, text="Word:").pack(side=tk.LEFT, padx=5)
 entry_word = ttk.Entry(frame_input, width=30)
 entry_word.pack(side=tk.LEFT, padx=5)
+entry_word.bind("<Return>", add_word)
+
 ttk.Label(frame_input, text="Meaning:").pack(side=tk.LEFT, padx=5)
 entry_meaning = ttk.Entry(frame_input, width=50)
 entry_meaning.pack(side=tk.LEFT, padx=5)
+entry_meaning.bind("<Return>", add_word)
 
 ttk.Button(frame_input, text="Add Word", command=add_word).pack(side=tk.LEFT, padx=5)
+ttk.Button(frame_input, text="Edit Word", command=edit_word).pack(side=tk.LEFT, padx=5)
 ttk.Button(frame_input, text="Delete Word", command=delete_word).pack(
     side=tk.LEFT, padx=5
 )
