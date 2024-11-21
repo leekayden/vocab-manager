@@ -344,29 +344,30 @@ def show_license_key_entry():
 
 
 def fetch_all_definitions(word):
-    """Fetch all available definitions of a word using the dictionary API."""
+    """Fetch all available definitions and examples of a word using the dictionary API."""
     url = f"{DICTIONARY_API_URL}{word.lower()}"
     response = requests.get(url)
     if response.status_code != 200:
         return None
     data = response.json()
 
-    # Extract all definitions
+    # Extract all definitions and examples
     definitions = []
     for meaning in data[0]["meanings"]:
         part_of_speech = meaning.get("partOfSpeech", "Unknown")
-        definitions.extend(
-            {
-                "partOfSpeech": part_of_speech,
-                "definition": definition["definition"],
-            }
-            for definition in meaning["definitions"]
-        )
+        for definition in meaning["definitions"]:
+            definitions.append(
+                {
+                    "partOfSpeech": part_of_speech,
+                    "definition": definition["definition"],
+                    "example": definition.get("example", "No example available"),
+                }
+            )
     return definitions
 
 
 def view_definitions():
-    """Display all definitions for the selected word in a popup window."""
+    """Display all definitions and examples for the selected word in a popup window."""
     selected_item = tree_vocabulary.selection()
     if not selected_item:
         messagebox.showwarning(
@@ -385,8 +386,8 @@ def view_definitions():
 
     # Create a popup window
     definitions_window = tk.Toplevel(root)
-    definitions_window.title(f"Definitions of '{word}'")
-    definitions_window.geometry("500x400")
+    definitions_window.title(f"Definitions and Examples for '{word}'")
+    definitions_window.geometry("600x500")
     definitions_window.resizable(True, True)
 
     ttk.Label(
@@ -395,7 +396,7 @@ def view_definitions():
         font=("Verdana", 14, "bold"),
     ).pack(pady=10)
 
-    # Create a scrollable text widget to display definitions
+    # Create a scrollable text widget to display definitions and examples
     frame = ttk.Frame(definitions_window)
     frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -406,11 +407,15 @@ def view_definitions():
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
     text_widget.config(yscrollcommand=scrollbar.set)
 
-    # Insert definitions into the text widget
+    # Insert definitions and examples into the text widget
     for idx, definition in enumerate(definitions, start=1):
         part_of_speech = definition["partOfSpeech"]
         definition_text = definition["definition"]
-        text_widget.insert(tk.END, f"{idx}. ({part_of_speech}) {definition_text}\n\n")
+        example_text = definition["example"]
+        text_widget.insert(
+            tk.END,
+            f"{idx}. ({part_of_speech}) {definition_text}\n   Example: {example_text}\n\n",
+        )
 
     text_widget.config(state=tk.DISABLED)  # Make the text widget read-only
 
@@ -477,7 +482,7 @@ def clear_selection(event=None):
 
 
 def on_double_click(event):
-    """Handle double-click event on a row to display word definitions."""
+    """Handle double-click event on a row to display word definitions and examples."""
     global definition_window
 
     selected_item = tree_vocabulary.selection()
@@ -504,8 +509,8 @@ def on_double_click(event):
 
     # Create a new definition window
     definition_window = tk.Toplevel(root)
-    definition_window.title(f"Definitions of '{word}'")
-    definition_window.geometry("500x400")
+    definition_window.title(f"Definitions and Examples for '{word}'")
+    definition_window.geometry("600x500")
     definition_window.resizable(True, True)
 
     ttk.Label(
@@ -514,7 +519,7 @@ def on_double_click(event):
         font=("Verdana", 14, "bold"),
     ).pack(pady=10)
 
-    # Create a scrollable text widget to display definitions
+    # Create a scrollable text widget to display definitions and examples
     frame = ttk.Frame(definition_window)
     frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
@@ -525,11 +530,15 @@ def on_double_click(event):
     scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
     text_widget.config(yscrollcommand=scrollbar.set)
 
-    # Insert definitions into the text widget
+    # Insert definitions and examples into the text widget
     for idx, definition in enumerate(definitions, start=1):
         part_of_speech = definition["partOfSpeech"]
         definition_text = definition["definition"]
-        text_widget.insert(tk.END, f"{idx}. ({part_of_speech}) {definition_text}\n\n")
+        example_text = definition["example"]
+        text_widget.insert(
+            tk.END,
+            f"{idx}. ({part_of_speech}) {definition_text}\n   Example: {example_text}\n\n",
+        )
 
     text_widget.config(state=tk.DISABLED)  # Make the text widget read-only
 
