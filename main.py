@@ -64,6 +64,10 @@ def init_db():
     conn.close()
 
 
+# Global variable to track the open definition window
+definition_window = None
+
+
 def validate_license_key(license_key):
     """Validate the license key and ensure it matches the machine."""
     conn = mysql.connector.connect(**DB_CONFIG)
@@ -472,6 +476,88 @@ def clear_selection(event=None):
     tree_vocabulary.selection_remove(tree_vocabulary.selection())
 
 
+def on_double_click(event):
+    """Handle double-click event on a row to display word definitions."""
+    global definition_window
+
+    selected_item = tree_vocabulary.selection()
+    if not selected_item:
+        messagebox.showwarning(
+            "Selection Error", "Please select a word to view its definitions."
+        )
+        return
+
+    word = tree_vocabulary.item(selected_item, "values")[0]
+    definitions = fetch_all_definitions(word)
+
+    if not definitions:
+        messagebox.showerror(
+            "Error", "Could not fetch definitions for the selected word."
+        )
+        return
+
+    # Check if a definition window is already open
+    if definition_window and tk.Toplevel.winfo_exists(definition_window):
+        # If the window exists, bring it to focus
+        definition_window.focus()
+        return
+
+    # Create a new definition window
+    definition_window = tk.Toplevel(root)
+    definition_window.title(f"Definitions of '{word}'")
+    definition_window.geometry("500x400")
+    definition_window.resizable(True, True)
+
+    ttk.Label(
+        definition_window,
+        text=f"{word}",
+        font=("Verdana", 14, "bold"),
+    ).pack(pady=10)
+
+    # Create a scrollable text widget to display definitions
+    frame = ttk.Frame(definition_window)
+    frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+    text_widget = tk.Text(frame, wrap=tk.WORD, font=("Verdana", 12))
+    text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+    scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=text_widget.yview)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+    text_widget.config(yscrollcommand=scrollbar.set)
+
+    # Insert definitions into the text widget
+    for idx, definition in enumerate(definitions, start=1):
+        part_of_speech = definition["partOfSpeech"]
+        definition_text = definition["definition"]
+        text_widget.insert(tk.END, f"{idx}. ({part_of_speech}) {definition_text}\n\n")
+
+    text_widget.config(state=tk.DISABLED)  # Make the text widget read-only
+
+    ttk.Button(
+        definition_window, text="Close", command=lambda: close_window(definition_window)
+    ).pack(pady=10)
+
+    # Properly handle window close action
+    definition_window.protocol(
+        "WM_DELETE_WINDOW", lambda: close_window(definition_window)
+    )
+
+
+def close_window(window):
+    """Close the definition window and reset the global reference."""
+    global definition_window
+    if window and tk.Toplevel.winfo_exists(window):
+        window.destroy()
+    definition_window = None
+
+
+def clear_definition_window(window):
+    """Clear the global reference when the definition window is closed."""
+    global definition_window
+    if window == definition_window:
+        definition_window = None
+
+
 # Main Application Window
 root = tk.Tk()
 root.title("Vocabulary Manager")
@@ -519,6 +605,9 @@ tree_vocabulary.bind("<Configure>", adjust_column_widths)
 
 # Bind the Escape key to clear the selection
 tree_vocabulary.bind("<Escape>", clear_selection)
+
+# Bind the double-click event to show definitions
+tree_vocabulary.bind("<Double-1>", on_double_click)
 
 # Scrollbar for Treeview
 scrollbar = ttk.Scrollbar(root, orient=tk.VERTICAL, command=tree_vocabulary.yview)
