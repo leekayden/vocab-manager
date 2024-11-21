@@ -2,4 +2,7 @@
 
 ## build
 
-### pyinstaller --onefile --windowed --icon="32x32.ico" main.py
+```pwsh
+pyinstaller --onefile --windowed --icon="32x32.ico" main.py
+
+```
