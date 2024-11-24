@@ -28,7 +28,7 @@ def generate_machine_id():
     )
 
 
-MACHINE_ID = generate_machine_id()
+MACHINE_ID = uuid.getnode()
 
 
 def init_db():
