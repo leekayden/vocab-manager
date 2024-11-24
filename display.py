@@ -21,6 +21,6 @@ def get_all_words():
 
 def print_words():
     words = get_all_words()
-    print(" ".join(words))
+    print(", ".join(words))
 
 print_words()
