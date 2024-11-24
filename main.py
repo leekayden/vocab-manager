@@ -567,11 +567,17 @@ def clear_definition_window(window):
         definition_window = None
 
 
+url = "https://cdn.cloudservetechcentral.com/vocab-manager/32x32.ico"
+response = requests.get(url)
+with open("icon.ico", "wb") as file:
+    file.write(response.content)
+
+
 # Main Application Window
 root = tk.Tk()
 root.title("Vocabulary Manager")
 root.geometry("900x600")
-root.iconbitmap("32x32.ico")
+root.iconbitmap("icon.ico")
 root.option_add("*Font", "Verdana 10")
 
 # Menu Bar
