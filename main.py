@@ -6,6 +6,9 @@ import os
 import uuid
 from dotenv import load_dotenv
 from datetime import datetime
+from fpdf import FPDF
+import openpyxl
+from openpyxl import Workbook
 
 load_dotenv()
 
@@ -18,14 +21,12 @@ DB_CONFIG = {
 
 DICTIONARY_API_URL = "https://api.dictionaryapi.dev/api/v2/entries/en/"
 
+TIMESTAMP = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
 
 def generate_machine_id():
-    """Generate a unique identifier for the current machine using its MAC address."""
-    return ":".join(
-        ["{:02x}".format((uuid.getnode() >> ele) & 0xFF) for ele in range(0, 8 * 6, 8)][
-            ::-1
-        ]
-    )
+    """Generate a unique identifier for the current machine."""
+    return str(uuid.UUID(int=uuid.getnode()))
 
 
 MACHINE_ID = uuid.getnode()
@@ -196,7 +197,7 @@ def edit_word():
     edit_window.title("Edit Word")
     edit_window.geometry("400x200")
 
-    ttk.Label(edit_window, text="Word:").pack(pady=5)
+    ttk.Label(edit_window, text="Word/Phrase:").pack(pady=5)
     entry_new_word = ttk.Entry(edit_window, font=("Verdana", 12))
     entry_new_word.pack(pady=5, padx=10, fill=tk.X)
     entry_new_word.insert(0, word)
@@ -567,6 +568,84 @@ def clear_definition_window(window):
         definition_window = None
 
 
+def export_to_pdf():
+    """Export the vocabulary list to a PDF file."""
+    # Fetch vocabulary data
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("SELECT word, meaning FROM vocabulary")
+    vocabulary = cursor.fetchall()
+    conn.close()
+
+    if not vocabulary:
+        messagebox.showinfo("Export PDF", "No words found to export.")
+        return
+
+    # Create a PDF instance
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_font("Arial", size=12)
+
+    # Add a title
+    pdf.set_font("Arial", style="B", size=14)
+    pdf.cell(200, 10, txt="Vocabulary List", ln=True, align="C")
+    pdf.ln(10)  # Add a line break
+
+    # Add vocabulary data
+    pdf.set_font("Arial", size=12)
+    for word, meaning in vocabulary:
+        pdf.cell(0, 10, txt=f"Word: {word}", ln=True)
+        pdf.multi_cell(0, 10, txt=f"Meaning: {meaning}", align="L")
+        pdf.ln(5)  # Add a small space between entries
+
+    # Save the PDF
+    try:
+        pdf.output("Vocabulary_List.pdf")
+        messagebox.showinfo(
+            "Export PDF", "Vocabulary list has been exported to 'Vocabulary_List.pdf'."
+        )
+    except Exception as e:
+        messagebox.showerror("Export PDF", f"An error occurred: {e}")
+
+
+def export_to_xlsx():
+    """Export the vocabulary list to an XLSX file."""
+    # Fetch vocabulary data
+    conn = mysql.connector.connect(**DB_CONFIG)
+    cursor = conn.cursor()
+    cursor.execute("SELECT word, meaning FROM vocabulary")
+    vocabulary = cursor.fetchall()
+    conn.close()
+
+    if not vocabulary:
+        messagebox.showinfo("Export XLSX", "No words found to export.")
+        return
+
+    # Create a new Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Vocabulary List"
+
+    # Add headers to the Excel file
+    ws.append(["Word", "Meaning"])
+
+    # Add data rows
+    for word, meaning in vocabulary:
+        ws.append([word, meaning])
+
+    # Save the workbook to a file
+    try:
+        file_path = os.path.join(os.getcwd(), f"Vocabulary_List_{TIMESTAMP}.xlsx")
+        wb.save(file_path)
+        messagebox.showinfo(
+            "Export XLSX",
+            f"Vocabulary list has been exported to '{file_path}'.",
+        )
+    except Exception as e:
+        messagebox.showerror("Export XLSX", f"An error occurred: {e}")
+
+
 url = "https://cdn.cloudservetechcentral.com/vocab-manager/32x32.ico"
 response = requests.get(url)
 with open("icon.ico", "wb") as file:
@@ -576,12 +655,24 @@ with open("icon.ico", "wb") as file:
 # Main Application Window
 root = tk.Tk()
 root.title("Vocabulary Manager")
+root.state("zoomed")
 root.geometry("900x600")
 root.iconbitmap("icon.ico")
 root.option_add("*Font", "Verdana 10")
 
 # Menu Bar
 menubar = tk.Menu(root)
+
+# File Menu
+file_menu = tk.Menu(menubar, tearoff=0)
+
+export_menu = tk.Menu(file_menu, tearoff=0)
+export_menu.add_command(label="Export to PDF", command=export_to_pdf)
+export_menu.add_command(label="Export to XLSX", command=export_to_xlsx)
+
+file_menu.add_cascade(label="Export", menu=export_menu)
+
+menubar.add_cascade(label="File", menu=file_menu)
 
 # License Menu
 license_menu = tk.Menu(menubar, tearoff=0)
@@ -642,7 +733,7 @@ ttk.Button(frame_search, text="Search", command=on_search).pack(side=tk.LEFT, pa
 frame_input = ttk.Frame(root, padding=10)
 frame_input.pack(fill=tk.X)
 
-ttk.Label(frame_input, text="Word:").pack(side=tk.LEFT, padx=5)
+ttk.Label(frame_input, text="Word/Phrase:").pack(side=tk.LEFT, padx=5)
 entry_word = ttk.Entry(frame_input, width=30)
 entry_word.pack(side=tk.LEFT, padx=5)
 entry_word.bind("<Return>", add_word)
