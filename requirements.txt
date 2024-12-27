@@ -16,3 +16,5 @@ requests==2.32.3
 setuptools==71.0.4
 sv-ttk==2.6.0
 urllib3==2.2.2
+openpyxl
+fpdf

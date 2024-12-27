@@ -29,7 +29,7 @@ def generate_machine_id():
     return str(uuid.UUID(int=uuid.getnode()))
 
 
-MACHINE_ID = uuid.getnode()
+MACHINE_ID = generate_machine_id()
 
 
 def init_db():
@@ -49,19 +49,34 @@ def init_db():
     """
     )
 
-    # Create license_keys table with machine_id feature
+    # Create license_keys table with machine_id feature and max_machines
     cursor.execute(
         """
         CREATE TABLE IF NOT EXISTS license_keys (
             key_id INT AUTO_INCREMENT PRIMARY KEY,
             license_key VARCHAR(255) NOT NULL UNIQUE,
-            machine_id VARCHAR(255),
-            status ENUM('active', 'used', 'revoked') NOT NULL DEFAULT 'active',
+            max_machines INT NOT NULL DEFAULT 1,
+            status ENUM('active', 'revoked') NOT NULL DEFAULT 'active',
             expiry_date DATE DEFAULT NULL
         )
     """
     )
 
+    # Create machine_activations table
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS machine_activations (
+            activation_id INT AUTO_INCREMENT PRIMARY KEY,
+            license_key VARCHAR(255) NOT NULL,
+            machine_id VARCHAR(255) NOT NULL,
+            activation_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(license_key, machine_id),
+            FOREIGN KEY (license_key) REFERENCES license_keys(license_key)
+        )
+    """
+    )
+
+    conn.commit()
     conn.close()
 
 
@@ -74,23 +89,20 @@ def validate_license_key(license_key):
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
-    # Check if the current machine has a used license
+    # Check if the current machine is already activated
     cursor.execute(
-        "SELECT license_key FROM license_keys WHERE machine_id = %s AND status = 'used'",
-        (MACHINE_ID,),
+        "SELECT activation_id FROM machine_activations WHERE license_key = %s AND machine_id = %s",
+        (license_key, MACHINE_ID),
     )
-    used_license = cursor.fetchone()
+    existing_activation = cursor.fetchone()
 
-    if used_license:
+    if existing_activation:
         conn.close()
-        return (
-            True,
-            "Machine is already associated with a used license, skipping validation.",
-        )
+        return True, "Machine is already activated with this license key."
 
-    # Proceed with regular license validation
+    # Check license key status and max_machines
     cursor.execute(
-        "SELECT status, expiry_date, machine_id FROM license_keys WHERE license_key = %s",
+        "SELECT status, expiry_date, max_machines FROM license_keys WHERE license_key = %s",
         (license_key,),
     )
     result = cursor.fetchone()
@@ -99,29 +111,45 @@ def validate_license_key(license_key):
         conn.close()
         return False, "Invalid license key."
 
-    status, expiry_date, machine_id = result
+    status, expiry_date, max_machines = result
 
     # Check status
     if status != "active":
         conn.close()
         return False, "License key is not active."
-    elif machine_id and machine_id != MACHINE_ID:
-        conn.close()
-        return False, "License key is already linked to another machine."
 
     # Check expiry
     if expiry_date and datetime.strptime(expiry_date, "%Y-%m-%d") < datetime.now():
         conn.close()
         return False, "License key has expired."
 
-    # Mark as used and associate with the machine if valid
+    # Check number of activated machines
     cursor.execute(
-        "UPDATE license_keys SET status = 'used', machine_id = %s WHERE license_key = %s",
-        (MACHINE_ID, license_key),
+        "SELECT COUNT(*) FROM machine_activations WHERE license_key = %s",
+        (license_key,),
     )
-    conn.commit()
+    activated_machines = cursor.fetchone()[0]
+
+    if activated_machines >= max_machines:
+        conn.close()
+        return (
+            False,
+            f"Maximum number of machines ({max_machines}) already activated for this license key.",
+        )
+
+    # Activate the machine
+    try:
+        cursor.execute(
+            "INSERT INTO machine_activations (license_key, machine_id) VALUES (%s, %s)",
+            (license_key, MACHINE_ID),
+        )
+        conn.commit()
+    except mysql.connector.IntegrityError:
+        conn.close()
+        return False, "An error occurred while activating the machine."
+
     conn.close()
-    return True, "License key validated successfully and linked to this machine."
+    return True, "License key validated successfully and machine activated."
 
 
 def fetch_meaning(word):
@@ -298,24 +326,20 @@ def show_license_key_entry():
     conn = mysql.connector.connect(**DB_CONFIG)
     cursor = conn.cursor()
 
-    # Check if the machine already has a valid license
+    # Check if the machine is already activated
     cursor.execute(
-        "SELECT status FROM license_keys WHERE machine_id = %s AND status IN ('active', 'used')",
+        "SELECT license_key FROM machine_activations WHERE machine_id = %s",
         (MACHINE_ID,),
     )
     result = cursor.fetchone()
     conn.close()
 
     if result:
-        # If a valid license is found, skip the license key input
-        # messagebox.showinfo(
-        #     "License Validation",
-        #     "Machine is already associated with a valid license. Access granted.",
-        # )
+        # If the machine is already activated, skip the license key input
         root.deiconify()  # Show the main application window
         return
 
-    # Prompt for license key if no valid license is associated
+    # Prompt for license key if the machine is not activated
     def submit_key():
         license_key = entry_license.get().strip()
         valid, message = validate_license_key(license_key)
@@ -431,7 +455,13 @@ def show_license_status():
     cursor = conn.cursor()
 
     cursor.execute(
-        "SELECT license_key, status, expiry_date FROM license_keys WHERE machine_id = %s",
+        """
+        SELECT lk.license_key, lk.status, lk.expiry_date, lk.max_machines, COUNT(ma.machine_id) as activated_machines
+        FROM license_keys lk
+        JOIN machine_activations ma ON lk.license_key = ma.license_key
+        WHERE ma.machine_id = %s
+        GROUP BY lk.license_key
+    """,
         (MACHINE_ID,),
     )
     row = cursor.fetchone()
@@ -439,13 +469,13 @@ def show_license_status():
 
     if not row:
         messagebox.showinfo(
-            "License Status", "No active or used license found for this machine."
+            "License Status", "No active license found for this machine."
         )
         return
 
-    license_key, status, expiry_date = row
+    license_key, status, expiry_date, max_machines, activated_machines = row
     expiry_text = "No expiry" if expiry_date is None else expiry_date
-    message = f"License Key: {license_key}\nStatus: {status}\nExpiry: {expiry_text}"
+    message = f"License Key: {license_key}\nStatus: {status}\nExpiry: {expiry_text}\nMax Machines: {max_machines}\nActivated Machines: {activated_machines}"
     messagebox.showinfo("License Status", message)
 
 
