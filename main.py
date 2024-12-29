@@ -7,7 +7,6 @@ import uuid
 from dotenv import load_dotenv
 from datetime import datetime
 from fpdf import FPDF
-import openpyxl
 from openpyxl import Workbook
 
 load_dotenv()
